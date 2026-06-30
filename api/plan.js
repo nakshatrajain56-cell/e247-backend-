@@ -18,7 +18,7 @@
 
 // Verify the current model name at https://ai.google.dev/gemini-api/docs/models
 // flash-lite is the cheapest; flash is a safe default.
-const MODEL = "gemini-2.5-flash-lite";
+const MODEL = "gemini-flash-lite-latest";                                                                                                                                            ;
 const MAX_GOAL_CHARS = 1200;
 const MAX_SYSTEM_CHARS = 5000;
 const MAX_TEXT_CHARS = 240;
