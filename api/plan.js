@@ -214,9 +214,21 @@ export default async function handler(req, res) {
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     let obj;
     try {
-      obj = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
-    } catch {
-      return res.status(502).json({ error: "Could not parse plan JSON" });
+      // Strip markdown fences if present, then extract first {...} blob
+      let clean = text.trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+      const first = clean.indexOf("{");
+      const last = clean.lastIndexOf("}");
+      if (first === -1 || last === -1 || last <= first) {
+        console.error("No JSON object in response. Raw text:", text.slice(0, 500));
+        return res.status(502).json({ error: "AI returned no JSON", rawPreview: text.slice(0, 300) });
+      }
+      obj = JSON.parse(clean.slice(first, last + 1));
+    } catch (parseErr) {
+      console.error("Parse error:", parseErr, "Raw text:", text.slice(0, 500));
+      return res.status(502).json({ error: "Could not parse plan JSON", rawPreview: text.slice(0, 300) });
     }
 
     // The app refuses harmful goals on its own too, but double-check here.
