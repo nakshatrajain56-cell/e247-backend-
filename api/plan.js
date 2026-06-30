@@ -187,7 +187,12 @@ export default async function handler(req, res) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0.7 },
+            generationConfig: {
+              responseMimeType: "application/json",
+              maxOutputTokens: 8192,
+              temperature: 0.7,
+              thinkingConfig: { thinkingBudget: 0 },
+            },
           }),
         });
       } catch (e) {
@@ -211,7 +216,9 @@ export default async function handler(req, res) {
     console.log(`Used model: ${usedModel}`);
 
     const data = await r.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const candidate = data?.candidates?.[0];
+    const text = candidate?.content?.parts?.[0]?.text || "";
+    const finishReason = candidate?.finishReason || "UNKNOWN";
     let obj;
     try {
       // Strip markdown fences if present, then extract first {...} blob
@@ -222,13 +229,24 @@ export default async function handler(req, res) {
       const first = clean.indexOf("{");
       const last = clean.lastIndexOf("}");
       if (first === -1 || last === -1 || last <= first) {
-        console.error("No JSON object in response. Raw text:", text.slice(0, 500));
-        return res.status(502).json({ error: "AI returned no JSON", rawPreview: text.slice(0, 300) });
+        console.error("No JSON object. finishReason:", finishReason, "Raw:", text.slice(0, 500));
+        return res.status(502).json({
+          error: "AI returned no JSON",
+          finishReason,
+          textLength: text.length,
+          rawPreview: text.slice(0, 500),
+        });
       }
       obj = JSON.parse(clean.slice(first, last + 1));
     } catch (parseErr) {
-      console.error("Parse error:", parseErr, "Raw text:", text.slice(0, 500));
-      return res.status(502).json({ error: "Could not parse plan JSON", rawPreview: text.slice(0, 300) });
+      console.error("Parse error:", parseErr, "finishReason:", finishReason, "len:", text.length);
+      return res.status(502).json({
+        error: "Could not parse plan JSON",
+        finishReason,
+        textLength: text.length,
+        parseError: String(parseErr).slice(0, 200),
+        rawPreview: text.slice(0, 500),
+      });
     }
 
     // The app refuses harmful goals on its own too, but double-check here.
