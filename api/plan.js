@@ -19,25 +19,155 @@
 // Verify the current model name at https://ai.google.dev/gemini-api/docs/models
 // flash-lite is the cheapest; flash is a safe default.
 const MODEL = "gemini-2.5-flash-lite";
+const MAX_GOAL_CHARS = 1200;
+const MAX_SYSTEM_CHARS = 5000;
+const MAX_TEXT_CHARS = 240;
+const WINDOW_MS = 60 * 1000;
+const MAX_REQUESTS_PER_WINDOW = 15;
+const MAX_GOALS_PER_WINDOW = 5;
+const rateBuckets = globalThis.__e247RateBuckets || new Map();
+globalThis.__e247RateBuckets = rateBuckets;
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://endearing-sunshine-e5d262.netlify.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+
+function getAllowedOrigins() {
+  return (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS.join(","))
+    .split(",")
+    .map(origin => origin.trim())
+    .filter(Boolean);
+}
+
+function getClientId(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  const ip = Array.isArray(forwarded) ? forwarded[0] : (forwarded || req.socket?.remoteAddress || "");
+  return String(ip).split(",")[0].trim() || "unknown";
+}
+
+function checkRateLimit(clientId) {
+  const now = Date.now();
+  const bucket = rateBuckets.get(clientId) || { windowStart: now, requests: 0, goals: 0 };
+  if (now - bucket.windowStart >= WINDOW_MS) {
+    bucket.windowStart = now;
+    bucket.requests = 0;
+    bucket.goals = 0;
+  }
+  bucket.requests += 1;
+  bucket.goals += 1;
+  rateBuckets.set(clientId, bucket);
+
+  if (bucket.requests > MAX_REQUESTS_PER_WINDOW || bucket.goals > MAX_GOALS_PER_WINDOW) {
+    return Math.max(1, Math.ceil((WINDOW_MS - (now - bucket.windowStart)) / 1000));
+  }
+  return 0;
+}
+
+function validateGoal(goal) {
+  if (typeof goal !== "string") return "Missing goal";
+  const trimmed = goal.trim();
+  if (!trimmed) return "Missing goal";
+  if (trimmed.length > MAX_GOAL_CHARS) return `Goal must be ${MAX_GOAL_CHARS} characters or less`;
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(trimmed)) return "Goal contains unsupported characters";
+  if (/(ignore|override|forget|bypass|reveal|print|show)\s+(all\s+)?(previous|system|developer|safety|hidden)\s+(instructions?|rules?|prompt)/i.test(trimmed)) {
+    return "Please describe a normal learning, fitness, skill, or habit goal";
+  }
+  return "";
+}
+
+function maskSensitiveText(text) {
+  return text
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/(?:\+?91[-\s]?)?[6-9]\d{9}\b/g, "[phone]")
+    .replace(/\b(?:EDU|E247)-[A-Z0-9-]{4,}\b/gi, "[app-code]")
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]");
+}
+
+function cleanSystem(system) {
+  if (typeof system !== "string") return "";
+  return system.slice(0, MAX_SYSTEM_CHARS);
+}
+
+function safeText(value, fallback = "") {
+  return String(value || fallback).replace(/[\u0000-\u001F<>]/g, "").trim().slice(0, MAX_TEXT_CHARS);
+}
+
+function safeInt(value, min, max, fallback) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function cleanQuest(q, index, totalDays) {
+  return {
+    id: safeText(q?.id, `q${index + 1}`).slice(0, 32),
+    task: safeText(q?.task, "Complete one focused action today"),
+    track: safeText(q?.track, "study").slice(0, 24),
+    xp: safeInt(q?.xp, 10, 60, 20),
+    tag: safeText(q?.tag, "Quest").slice(0, 24),
+    day: safeInt(q?.day, 1, Math.min(7, totalDays), Math.min(index + 1, totalDays)),
+    dow: safeInt(q?.dow, -1, 6, -1),
+  };
+}
+
+function cleanPlan(obj) {
+  const totalDays = safeInt(obj?.totalDays, 1, 365, 30);
+  return {
+    title: safeText(obj?.title, "Study Plan").slice(0, 60),
+    deadline: safeText(obj?.deadline, `${totalDays} days`).slice(0, 40),
+    totalDays,
+    phases: Array.isArray(obj?.phases) ? obj.phases.slice(0, 5).map((p, i) => ({
+      name: safeText(p?.name, `Phase ${i + 1}`).slice(0, 60),
+      window: safeText(p?.window, ""),
+      focus: safeText(p?.focus, ""),
+      startDay: safeInt(p?.startDay, 1, totalDays, 1),
+      endDay: safeInt(p?.endDay, 1, totalDays, totalDays),
+    })) : [],
+    weekTemplate: Array.isArray(obj?.weekTemplate) ? obj.weekTemplate.slice(0, 8).map((q, i) => cleanQuest(q, i, totalDays)) : [],
+    milestones: Array.isArray(obj?.milestones) ? obj.milestones.slice(0, 10).map((q, i) => cleanQuest(q, i, totalDays)) : [],
+    firstWeek: Array.isArray(obj?.firstWeek) ? obj.firstWeek.slice(0, 10).map((q, i) => cleanQuest(q, i, totalDays)) : [],
+    tip: safeText(obj?.tip, "Small consistent action wins."),
+  };
+}
 
 export default async function handler(req, res) {
-  // CORS (safe to keep even on same origin)
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+  const origin = req.headers.origin;
+  const allowedOrigins = getAllowedOrigins();
+  if (!origin || allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin || allowedOrigins[0]);
+  }
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Vary", "Origin");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  if (origin && !allowedOrigins.includes(origin)) return res.status(403).json({ error: "Origin not allowed" });
+  if (!String(req.headers["content-type"] || "").includes("application/json")) {
+    return res.status(415).json({ error: "Content-Type must be application/json" });
+  }
 
   try {
     const { goal, system } = req.body || {};
-    if (!goal || typeof goal !== "string") {
-      return res.status(400).json({ error: "Missing goal" });
+    const validationError = validateGoal(goal);
+    if (validationError) return res.status(400).json({ error: validationError });
+
+    const retryAfter = checkRateLimit(getClientId(req));
+    if (retryAfter) {
+      res.setHeader("Retry-After", String(retryAfter));
+      return res.status(429).json({ error: "Too many plan requests. Please wait a minute and try again." });
     }
 
     const key = process.env.GEMINI_API_KEY;
     if (!key) return res.status(500).json({ error: "Server missing GEMINI_API_KEY" });
 
-    const prompt = `${system || ""}\n\nUSER GOAL: ${goal}`;
+    const safeGoal = maskSensitiveText(goal.trim());
+    const prompt = `${cleanSystem(system)}\n\nUSER GOAL: ${safeGoal}`;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
     const r = await fetch(url, {
@@ -66,7 +196,7 @@ export default async function handler(req, res) {
     // The app refuses harmful goals on its own too, but double-check here.
     if (obj.refusal) return res.status(200).json({ plan: { refusal: obj.refusal } });
 
-    return res.status(200).json({ plan: obj });
+    return res.status(200).json({ plan: cleanPlan(obj) });
   } catch (e) {
     return res.status(500).json({ error: String(e).slice(0, 300) });
   }
