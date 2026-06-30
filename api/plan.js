@@ -16,6 +16,9 @@
 //   and the URL becomes /.netlify/functions/plan)
 // ════════════════════════════════════════════════════════════════
 
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
+
 // Model fallback chain. Tries each in order. First one that works wins.
 // Add new aliases at the top when Google ships them.
 const MODELS = [
@@ -27,11 +30,35 @@ const MODELS = [
 const MAX_GOAL_CHARS = 1200;
 const MAX_SYSTEM_CHARS = 5000;
 const MAX_TEXT_CHARS = 240;
-const WINDOW_MS = 60 * 1000;
-const MAX_REQUESTS_PER_WINDOW = 15;
-const MAX_GOALS_PER_WINDOW = 5;
-const rateBuckets = globalThis.__e247RateBuckets || new Map();
-globalThis.__e247RateBuckets = rateBuckets;
+
+// ── Upstash Redis rate limiter ─────────────────────────────────
+// Two windows: burst (per-minute) and daily cap.
+// Falls back to "open" (no limiting) if env vars missing — function
+// still works, but is unprotected. Vercel logs flag this on cold start.
+let burstLimiter = null;
+let dailyLimiter = null;
+try {
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    const redis = Redis.fromEnv();
+    burstLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(10, "60 s"),
+      prefix: "e247:burst",
+      analytics: true,
+    });
+    dailyLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(50, "1 d"),
+      prefix: "e247:daily",
+      analytics: true,
+    });
+    console.log("rate-limit: active (Upstash Redis)");
+  } else {
+    console.warn("rate-limit: SKIPPED (Upstash env vars missing)");
+  }
+} catch (e) {
+  console.warn("rate-limit: setup failed", String(e).slice(0, 200));
+}
 
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://endearing-sunshine-e5d262.netlify.app",
@@ -52,22 +79,19 @@ function getClientId(req) {
   return String(ip).split(",")[0].trim() || "unknown";
 }
 
-function checkRateLimit(clientId) {
-  const now = Date.now();
-  const bucket = rateBuckets.get(clientId) || { windowStart: now, requests: 0, goals: 0 };
-  if (now - bucket.windowStart >= WINDOW_MS) {
-    bucket.windowStart = now;
-    bucket.requests = 0;
-    bucket.goals = 0;
+// Returns 0 if allowed, or seconds-to-retry if blocked.
+async function checkRateLimit(clientId) {
+  if (!burstLimiter || !dailyLimiter) return 0; // fail-open if Upstash missing
+  try {
+    const burst = await burstLimiter.limit(clientId);
+    if (!burst.success) return 60;
+    const daily = await dailyLimiter.limit(clientId);
+    if (!daily.success) return 86400;
+    return 0;
+  } catch (e) {
+    console.warn("rate-limit check failed:", String(e).slice(0, 200));
+    return 0; // fail-open on Redis flake
   }
-  bucket.requests += 1;
-  bucket.goals += 1;
-  rateBuckets.set(clientId, bucket);
-
-  if (bucket.requests > MAX_REQUESTS_PER_WINDOW || bucket.goals > MAX_GOALS_PER_WINDOW) {
-    return Math.max(1, Math.ceil((WINDOW_MS - (now - bucket.windowStart)) / 1000));
-  }
-  return 0;
 }
 
 function validateGoal(goal) {
@@ -162,7 +186,7 @@ export default async function handler(req, res) {
     const validationError = validateGoal(goal);
     if (validationError) return res.status(400).json({ error: validationError });
 
-    const retryAfter = checkRateLimit(getClientId(req));
+    const retryAfter = await checkRateLimit(getClientId(req));
     if (retryAfter) {
       res.setHeader("Retry-After", String(retryAfter));
       return res.status(429).json({ error: "Too many plan requests. Please wait a minute and try again." });
