@@ -16,9 +16,14 @@
 //   and the URL becomes /.netlify/functions/plan)
 // ════════════════════════════════════════════════════════════════
 
-// Verify the current model name at https://ai.google.dev/gemini-api/docs/models
-// flash-lite is the cheapest; flash is a safe default.
-const MODEL = "gemini-flash-lite-latest";                                                                                                                                            ;
+// Model fallback chain. Tries each in order. First one that works wins.
+// Add new aliases at the top when Google ships them.
+const MODELS = [
+  "gemini-flash-latest",       // Google's promised-stable alias
+  "gemini-flash-lite-latest",  // cheaper alias
+  "gemini-2.5-flash",          // stable fallback (no -lite)
+  "gemini-2.0-flash",          // older fallback
+];
 const MAX_GOAL_CHARS = 1200;
 const MAX_SYSTEM_CHARS = 5000;
 const MAX_TEXT_CHARS = 240;
@@ -169,20 +174,41 @@ export default async function handler(req, res) {
     const safeGoal = maskSensitiveText(goal.trim());
     const prompt = `${cleanSystem(system)}\n\nUSER GOAL: ${safeGoal}`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0.7 },
-      }),
-    });
-
-    if (!r.ok) {
-      const t = await r.text();
-      return res.status(502).json({ error: "Gemini error", detail: t.slice(0, 300) });
+    // Try each model in order. Surface the LAST error if all fail.
+    let r = null;
+    let lastDetail = "";
+    let lastStatus = 0;
+    let usedModel = "";
+    for (const model of MODELS) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+      try {
+        r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0.7 },
+          }),
+        });
+      } catch (e) {
+        lastDetail = `fetch failed: ${String(e).slice(0, 200)}`;
+        continue;
+      }
+      if (r.ok) { usedModel = model; break; }
+      lastStatus = r.status;
+      lastDetail = (await r.text()).slice(0, 500);
+      console.error(`Model ${model} failed: ${r.status} ${lastDetail}`);
     }
+
+    if (!r || !r.ok) {
+      return res.status(502).json({
+        error: "All Gemini models failed",
+        lastStatus,
+        tried: MODELS,
+        detail: lastDetail,
+      });
+    }
+    console.log(`Used model: ${usedModel}`);
 
     const data = await r.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
