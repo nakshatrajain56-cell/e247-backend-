@@ -37,11 +37,11 @@
 // they come from RevenueCat (validated by Google Play), not from
 // the client.
 const PRODUCT_CREDITS = {
-  "e247_5_plans_49": 5,
-  "e247_15_plans_99": 15,
-  "e247_50_plans_199": 50,
-  "e247_150_plans_499": 150,
-  "e247_400_plans_999": 400,
+  "e247_5_credits": 5,
+  "e247_15_credits": 15,
+  "e247_50_credits": 50,
+  "e247_150_credits": 150,
+  "e247_400_credits": 400,
 };
 
 // Event types that should grant credits.
