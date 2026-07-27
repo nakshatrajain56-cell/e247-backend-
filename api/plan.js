@@ -22,10 +22,10 @@ import { Redis } from "@upstash/redis";
 // Model fallback chain. Tries each in order. First one that works wins.
 // Add new aliases at the top when Google ships them.
 const MODELS = [
-  "gemini-flash-latest",       // Google's promised-stable alias
-  "gemini-flash-lite-latest",  // cheaper alias
-  "gemini-2.5-flash",          // stable fallback (no -lite)
-  "gemini-2.0-flash",          // older fallback
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-flash-latest",
+  "gemini-2.5-pro",
 ];
 const MAX_GOAL_CHARS = 1200;
 const MAX_SYSTEM_CHARS = 5000;
