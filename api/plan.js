@@ -81,8 +81,14 @@ Schema:
 Rules:
 - 3-5 phases that span the WHOLE duration (use startDay/endDay covering 1..totalDays).
 - weekTemplate: 4-8 recurring daily/weekly quests that repeat through the plan (the user's routine). Spread across days of week. Attack weak areas with more reps.
-- milestones: 4-10 key checkpoint quests on specific days (e.g. mock test day 30, revision day 60). Spread across the duration.
+- milestones: 4-10 key checkpoint quests. Their "day" values MUST be spread right across 1..totalDays — early, middle AND late (e.g. on a 30-day plan use days near 5, 12, 20, 27). Never bunch them on the same day and never put them all in the first week.
 - firstWeek: 7-10 concrete quests for days 1-7 to kick things off.
+
+BE SPECIFIC AND MEASURABLE. Every task must contain a real number the person can check off:
+- Fitness: state distance, time, sets/reps or calories — "Walk 5 km at brisk pace (~350 kcal)", not "go for a walk".
+- Study: state chapters, question counts or minutes — "Solve 40 MCQs from Kinematics in 60 min", not "practice physics".
+- Skill: state the concrete output — "Build a to-do app with add + delete working", not "practice coding".
+Scale the numbers to the user's stated time budget and starting point, and make them get harder across the phases.
 - Keep strings short so JSON stays compact.`;
 
 // ── Supabase (server-side, service role) ───────────────────────
@@ -209,16 +215,32 @@ function safeInt(value, min, max, fallback) {
   return Math.max(min, Math.min(max, n));
 }
 
-function cleanQuest(q, index, totalDays) {
+// `maxDay` differs by quest type. firstWeek really is days 1-7, but milestones
+// are spread across the WHOLE plan. Clamping everything to 7 collapsed every
+// milestone of a 30-day plan onto day 7.
+function cleanQuest(q, index, totalDays, maxDay) {
+  const cap = Math.max(1, Math.min(maxDay || totalDays, totalDays));
   return {
     id: safeText(q?.id, `q${index + 1}`).slice(0, 32),
     task: safeText(q?.task, "Complete one focused action today"),
     track: safeText(q?.track, "study").slice(0, 24),
     xp: safeInt(q?.xp, 10, 60, 20),
     tag: safeText(q?.tag, "Quest").slice(0, 24),
-    day: safeInt(q?.day, 1, Math.min(7, totalDays), Math.min(index + 1, totalDays)),
+    day: safeInt(q?.day, 1, cap, Math.min(index + 1, cap)),
     dow: safeInt(q?.dow, -1, 6, -1),
   };
+}
+
+// If the model bunched milestones together (or left days off), spread them
+// evenly across the plan so a long plan has checkpoints all the way through.
+function spreadMilestones(list, totalDays) {
+  if (!list.length) return list;
+  const distinct = new Set(list.map(m => m.day));
+  if (distinct.size >= Math.min(list.length, 3) && Math.max(...list.map(m => m.day)) > totalDays * 0.5) {
+    return list.sort((a, b) => a.day - b.day);
+  }
+  const step = totalDays / (list.length + 1);
+  return list.map((m, i) => ({ ...m, day: Math.max(1, Math.min(totalDays, Math.round(step * (i + 1)))) }));
 }
 
 function cleanPlan(obj) {
@@ -234,9 +256,9 @@ function cleanPlan(obj) {
       startDay: safeInt(p?.startDay, 1, totalDays, 1),
       endDay: safeInt(p?.endDay, 1, totalDays, totalDays),
     })) : [],
-    weekTemplate: Array.isArray(obj?.weekTemplate) ? obj.weekTemplate.slice(0, 8).map((q, i) => cleanQuest(q, i, totalDays)) : [],
-    milestones: Array.isArray(obj?.milestones) ? obj.milestones.slice(0, 10).map((q, i) => cleanQuest(q, i, totalDays)) : [],
-    firstWeek: Array.isArray(obj?.firstWeek) ? obj.firstWeek.slice(0, 10).map((q, i) => cleanQuest(q, i, totalDays)) : [],
+    weekTemplate: Array.isArray(obj?.weekTemplate) ? obj.weekTemplate.slice(0, 8).map((q, i) => cleanQuest(q, i, totalDays, totalDays)) : [],
+    milestones: Array.isArray(obj?.milestones) ? spreadMilestones(obj.milestones.slice(0, 10).map((q, i) => cleanQuest(q, i, totalDays, totalDays)), totalDays) : [],
+    firstWeek: Array.isArray(obj?.firstWeek) ? obj.firstWeek.slice(0, 10).map((q, i) => cleanQuest(q, i, totalDays, 7)) : [],
     tip: safeText(obj?.tip, "Small consistent action wins."),
   };
 }
