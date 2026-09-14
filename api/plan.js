@@ -22,13 +22,12 @@ import { Redis } from "@upstash/redis";
 // Model fallback chain. Tries each in order. First one that works wins.
 // Add new aliases at the top when Google ships them.
 const MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-flash-latest",
-  "gemini-2.5-pro",
+  "gemini-2.5-flash",          // GA, current primary (2.0 was shut down Jun 2026)
+  "gemini-2.5-flash-lite",     // cheaper GA fallback
+  "gemini-flash-latest",       // rolling alias to newest flash
+  "gemini-2.5-pro",            // last-resort higher-quality fallback
 ];
 const MAX_GOAL_CHARS = 1200;
-const MAX_SYSTEM_CHARS = 5000;
 const MAX_TEXT_CHARS = 240;
 
 // ── Upstash Redis rate limiter ─────────────────────────────────
@@ -60,10 +59,95 @@ try {
   console.warn("rate-limit: setup failed", String(e).slice(0, 200));
 }
 
+
+// ════════════════════════════════════════════════════════════════
+//  The planning prompt lives HERE, on the server. It is never taken
+//  from the request: if the client could supply it, anyone could turn
+//  this endpoint (and the Gemini key behind it) into a free general
+//  purpose LLM. Client-supplied `system` values are ignored.
+// ════════════════════════════════════════════════════════════════
+const SYSTEM_PROMPT = `You are the planning engine for "24/7 education" — a gamified quest app used by students including minors as young as 10.
+SAFETY: Only build plans for constructive goals (studies, fitness, skills, habits). If harmful, return {"refusal":"reason"}.
+OUTPUT: ONLY valid minified JSON, no markdown, no backticks.
+
+First, work out the plan's total duration in DAYS from the user's deadline:
+- "30 days" / "1 month" → ~30, "3 months" → ~90, "6 months" → ~180, "1 year" → 365
+- If no deadline given, choose a sensible duration for the goal (e.g. 30).
+- Clamp between 1 and 365.
+
+Schema:
+{"title":"<=5 words","deadline":"short label","totalDays":<int 1-365>,"phases":[{"name":"phase name","window":"e.g. Weeks 1-3","focus":"one line","startDay":<int>,"endDay":<int>}],"weekTemplate":[{"track":"study|fitness|skill|habit|mind","task":"specific repeatable daily action","xp":<10-40>,"tag":"1-2 word label","dow":<0-6, day of week this applies: 0=Mon..6=Sun, or -1 for every day>}],"milestones":[{"day":<int>,"task":"specific milestone action","track":"...","xp":<25-60>,"tag":"1-2 word"}],"firstWeek":[{"id":"q1","task":"specific action for the very first days","track":"...","xp":<10-40>,"tag":"1-2 word","day":<1-7>}],"tip":"one motivating line"}
+
+Rules:
+- 3-5 phases that span the WHOLE duration (use startDay/endDay covering 1..totalDays).
+- weekTemplate: 4-8 recurring daily/weekly quests that repeat through the plan (the user's routine). Spread across days of week. Attack weak areas with more reps.
+- milestones: 4-10 key checkpoint quests on specific days (e.g. mock test day 30, revision day 60). Spread across the duration.
+- firstWeek: 7-10 concrete quests for days 1-7 to kick things off.
+- Keep strings short so JSON stays compact.`;
+
+// ── Supabase (server-side, service role) ───────────────────────
+function sbEnv() {
+  const url = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || serviceKey;
+  return { url, serviceKey, anonKey };
+}
+
+// Verify the caller's Supabase access token and return their user id.
+// No valid token => no plan. This is what stops anonymous curl requests.
+async function resolveUser(req) {
+  const { url, anonKey } = sbEnv();
+  if (!url || !anonKey) return { error: "server-misconfigured" };
+  const auth = String(req.headers.authorization || "");
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return { error: "no-token" };
+  try {
+    const r = await fetch(`${url}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: anonKey },
+    });
+    if (!r.ok) return { error: "bad-token" };
+    const u = await r.json();
+    if (!u || !u.id) return { error: "bad-token" };
+    return { uid: u.id };
+  } catch (e) {
+    console.error("resolveUser:", String(e).slice(0, 200));
+    return { error: "auth-unavailable" };
+  }
+}
+
+async function creditRpc(fn, uid) {
+  const { url, serviceKey } = sbEnv();
+  if (!url || !serviceKey) return null;
+  try {
+    const r = await fetch(`${url}/rest/v1/rpc/${fn}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ p_uid: uid }),
+    });
+    if (!r.ok) {
+      console.error(`${fn} failed:`, r.status, (await r.text()).slice(0, 200));
+      return null;
+    }
+    return await r.json();
+  } catch (e) {
+    console.error(`${fn} error:`, String(e).slice(0, 200));
+    return null;
+  }
+}
+
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://endearing-sunshine-e5d262.netlify.app",
   "http://localhost:5173",
   "http://localhost:3000",
+  // Capacitor native app (Android/iOS) origins — the webview serves from localhost.
+  "https://localhost",
+  "http://localhost",
+  "capacitor://localhost",
+  "ionic://localhost",
 ];
 
 function getAllowedOrigins() {
@@ -114,10 +198,6 @@ function maskSensitiveText(text) {
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]");
 }
 
-function cleanSystem(system) {
-  if (typeof system !== "string") return "";
-  return system.slice(0, MAX_SYSTEM_CHARS);
-}
 
 function safeText(value, fallback = "") {
   return String(value || fallback).replace(/[\u0000-\u001F<>]/g, "").trim().slice(0, MAX_TEXT_CHARS);
@@ -168,11 +248,11 @@ export default async function handler(req, res) {
 
   const origin = req.headers.origin;
   const allowedOrigins = getAllowedOrigins();
-  if (!origin || allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin || allowedOrigins[0]);
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Vary", "Origin");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -182,11 +262,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { goal, system } = req.body || {};
+    const { goal } = req.body || {};
     const validationError = validateGoal(goal);
     if (validationError) return res.status(400).json({ error: validationError });
 
-    const retryAfter = await checkRateLimit(getClientId(req));
+    // ── Who is asking? No valid Supabase session => no plan. ──
+    const who = await resolveUser(req);
+    if (who.error === "server-misconfigured") {
+      return res.status(500).json({ error: "Server auth not configured" });
+    }
+    if (who.error) {
+      return res.status(401).json({ error: "Please sign in to build a plan." });
+    }
+    const uid = who.uid;
+
+    const retryAfter = await checkRateLimit(uid);
     if (retryAfter) {
       res.setHeader("Retry-After", String(retryAfter));
       return res.status(429).json({ error: "Too many plan requests. Please wait a minute and try again." });
@@ -195,8 +285,21 @@ export default async function handler(req, res) {
     const key = process.env.GEMINI_API_KEY;
     if (!key) return res.status(500).json({ error: "Server missing GEMINI_API_KEY" });
 
+    // ── Pay first. The credit is taken BEFORE Gemini is called, so a
+    // request that was never paid for can never reach the model. ──
+    const spent = await creditRpc("spend_credit_for_user", uid);
+    if (spent !== true) {
+      return res.status(402).json({ error: "No plan credits left.", code: "NO_CREDITS" });
+    }
+    let charged = true;
+    const refund = async () => {
+      if (!charged) return;
+      charged = false;
+      await creditRpc("refund_credit_for_user", uid);
+    };
+
     const safeGoal = maskSensitiveText(goal.trim());
-    const prompt = `${cleanSystem(system)}\n\nUSER GOAL: ${safeGoal}`;
+    const prompt = `${SYSTEM_PROMPT}\n\nUSER GOAL: ${safeGoal}`;
 
     // Try each model in order. Surface the LAST error if all fail.
     let r = null;
@@ -230,6 +333,7 @@ export default async function handler(req, res) {
     }
 
     if (!r || !r.ok) {
+      await refund();
       return res.status(502).json({
         error: "All Gemini models failed",
         lastStatus,
@@ -254,6 +358,7 @@ export default async function handler(req, res) {
       const last = clean.lastIndexOf("}");
       if (first === -1 || last === -1 || last <= first) {
         console.error("No JSON object. finishReason:", finishReason, "Raw:", text.slice(0, 500));
+        await refund();
         return res.status(502).json({
           error: "AI returned no JSON",
           finishReason,
@@ -264,6 +369,7 @@ export default async function handler(req, res) {
       obj = JSON.parse(clean.slice(first, last + 1));
     } catch (parseErr) {
       console.error("Parse error:", parseErr, "finishReason:", finishReason, "len:", text.length);
+      await refund();
       return res.status(502).json({
         error: "Could not parse plan JSON",
         finishReason,
@@ -274,10 +380,15 @@ export default async function handler(req, res) {
     }
 
     // The app refuses harmful goals on its own too, but double-check here.
-    if (obj.refusal) return res.status(200).json({ plan: { refusal: obj.refusal } });
+    // A refused goal costs nothing — give the credit back.
+    if (obj.refusal) {
+      await refund();
+      return res.status(200).json({ plan: { refusal: obj.refusal } });
+    }
 
     return res.status(200).json({ plan: cleanPlan(obj) });
   } catch (e) {
+    console.error("plan handler:", String(e).slice(0, 300));
     return res.status(500).json({ error: String(e).slice(0, 300) });
   }
 }
