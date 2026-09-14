@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>E247 Control Centre</title>
+<style>
+  :root{
+    --bg:#07090d; --panel:#0e131b; --panel-2:#131a25; --line:#1d2635;
+    --ink:#f2f6ff; --ink-2:#aab6cb; --ink-3:#6b7889;
+    --green:#32d74b; --red:#ff453a; --amber:#ffd60a; --blue:#0a84ff;
+    --violet:#bf5af2; --teal:#40c8e0;
+    --r:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--blue)}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 18px 90px}
+
+  /* ---------- gate ---------- */
+  #gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  [hidden]{display:none !important}
+  .gate-card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line);
+    border-radius:20px;padding:28px}
+  .gate-card h1{font-size:20px;margin:0 0 6px}
+  .gate-card p{color:var(--ink-3);font-size:13px;margin:0 0 20px}
+  input,select{width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+    border-radius:11px;padding:11px 13px;font-size:15px;font-family:inherit;outline:none}
+  input:focus{border-color:var(--blue)}
+  button{font-family:inherit;font-size:14px;font-weight:600;border:none;border-radius:11px;
+    padding:11px 16px;cursor:pointer;color:#fff;background:var(--blue);transition:opacity .15s}
+  button:hover{opacity:.85} button:active{transform:scale(.985)}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--ink-2)}
+  button.danger{background:var(--red)}
+  button.small{padding:7px 11px;font-size:12.5px;border-radius:9px}
+  .err{color:var(--red);font-size:13px;margin-top:12px;min-height:18px}
+
+  /* ---------- header ---------- */
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+  .logo{font-size:19px;font-weight:700;letter-spacing:-.3px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;
+    margin-right:7px;vertical-align:1px;box-shadow:0 0 0 3px rgba(50,215,75,.15)}
+  .spacer{flex:1}
+  .stamp{color:var(--ink-3);font-size:12.5px;font-variant-numeric:tabular-nums}
+
+  /* ---------- layout ---------- */
+  .grid{display:grid;gap:12px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:860px){.g4{grid-template-columns:repeat(2,1fr)}.g3,.g2{grid-template-columns:1fr}}
+  @media(max-width:520px){.g4{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 17px}
+  .card h3{margin:0 0 3px;font-size:12px;font-weight:600;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-3)}
+  .big{font-size:30px;font-weight:700;letter-spacing:-.8px;font-variant-numeric:tabular-nums;
+    margin:4px 0 2px;line-height:1.1}
+  .sub{font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .pos{color:var(--green)} .neg{color:var(--red)} .warn{color:var(--amber)}
+
+  h2.sec{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ink-3);margin:30px 0 11px}
+
+  /* ---------- health ---------- */
+  .check{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .check:last-child{border-bottom:none}
+  .pip{width:9px;height:9px;border-radius:50%;flex:none;margin-top:6px}
+  .ok{background:var(--green)} .bad{background:var(--red)} .mid{background:var(--amber)}
+  .check .t{font-size:14px} .check .d{font-size:12.5px;color:var(--ink-3);margin-top:1px}
+  .check .v{margin-left:auto;font-variant-numeric:tabular-nums;font-size:13.5px;color:var(--ink-2);
+    white-space:nowrap;padding-left:12px}
+
+  /* ---------- bars ---------- */
+  .meter{height:7px;border-radius:99px;background:#1a2230;overflow:hidden;margin-top:9px}
+  .meter i{display:block;height:100%;border-radius:99px;background:var(--blue)}
+  .tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px}
+  table{width:100%;min-width:400px;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;color:var(--ink-3);font-weight:600;font-size:11.5px;letter-spacing:.05em;
+    text-transform:uppercase;padding:0 10px 9px 0;border-bottom:1px solid var(--line)}
+  td{padding:10px 10px 10px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  .muted{color:var(--ink-3)}
+  .empty{color:var(--ink-3);font-size:13.5px;padding:14px 0}
+
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .row label{font-size:13px;color:var(--ink-2);min-width:150px}
+  .row input{width:130px}
+  .stop{background:linear-gradient(180deg,#2a0f12,#1a0a0d);border:1px solid #4a1d22}
+  .hint{font-size:12.5px;color:var(--ink-3);margin-top:9px;line-height:1.5}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel-2);
+    border:1px solid var(--line);color:var(--ink);padding:11px 17px;border-radius:12px;font-size:13.5px;
+    opacity:0;pointer-events:none;transition:opacity .25s;z-index:50}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <form class="gate-card" onsubmit="event.preventDefault();signIn()">
+    <h1>E247 Control Centre</h1>
+    <p>Enter your admin token to continue.</p>
+    <input id="tok" type="password" placeholder="Admin token" autocomplete="off" />
+    <div class="err" id="gateErr"></div>
+    <button style="width:100%" type="submit">Unlock</button>
+  </form>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <header>
+    <div class="logo"><span class="dot" id="live"></span>E247 Control Centre</div>
+    <div class="spacer"></div>
+    <div class="stamp" id="stamp">—</div>
+    <button class="ghost small" onclick="load()">Refresh</button>
+    <button class="ghost small" onclick="signOut()">Lock</button>
+  </header>
+  <div id="body"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "/api/admin";
+let TOKEN = null, DATA = null, timer = null;
+
+const $ = id => document.getElementById(id);
+const rs = n => "₹" + Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2});
+const num = n => Number(n||0).toLocaleString("en-IN");
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"),2600); }
+
+async function api(method, body){
+  const r = await fetch(API, {
+    method,
+    headers: { "x-admin-token": TOKEN, "Content-Type":"application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401) { signOut(); throw new Error("Token rejected"); }
+  if (!r.ok) throw new Error("Request failed (" + r.status + ")");
+  return r.json();
+}
+
+function signIn(){
+  const v = $("tok").value.trim();
+  if (!v) return;
+  TOKEN = v;
+  $("gateErr").textContent = "";
+  api("GET").then(d => {
+    try { localStorage.setItem("e247.admin", v); } catch(e){}
+    DATA = d; $("gate").hidden = true; $("app").hidden = false;
+    render(); schedule();
+  }).catch(e => { TOKEN = null; $("gateErr").textContent = e.message; });
+}
+
+function signOut(){
+  TOKEN = null; DATA = null;
+  try { localStorage.removeItem("e247.admin"); } catch(e){}
+  clearInterval(timer);
+  $("app").hidden = true; $("gate").hidden = false; $("tok").value = "";
+}
+
+function schedule(){ clearInterval(timer); timer = setInterval(load, 60000); }
+
+async function load(){
+  try {
+    $("live").style.background = "var(--amber)";
+    DATA = await api("GET");
+    render();
+    $("live").style.background = "var(--green)";
+  } catch(e){ $("live").style.background = "var(--red)"; toast(e.message); }
+}
+
+async function act(op, extra, confirmMsg){
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  try {
+    const out = await api("POST", Object.assign({ op }, extra || {}));
+    if (out && out.ok === false) return toast(out.error || "Refused");
+    toast("Done");
+    load();
+  } catch(e){ toast(e.message); }
+}
+
+/* -------- local-only: how much you have pre-loaded with the AI provider -------- */
+function balance(){ try { return Number(localStorage.getItem("e247.balance")||0); } catch(e){ return 0; } }
+function setBalance(){
+  const v = prompt("How much credit do you currently have loaded with Google / your AI provider, in rupees?", balance() || "");
+  if (v === null) return;
+  const n = Number(String(v).replace(/[^0-9.]/g,""));
+  try { localStorage.setItem("e247.balance", isFinite(n) ? n : 0); } catch(e){}
+  render();
+}
+
+function sparkline(days, key, colour){
+  const vals = days.map(d => Number(d[key]||0));
+  const max = Math.max(1, ...vals);
+  const w = 100, h = 30, n = vals.length;
+  const bw = w / n;
+  let bars = "";
+  vals.forEach((v,i) => {
+    const bh = (v / max) * h;
+    bars += '<rect x="'+(i*bw+bw*0.15).toFixed(2)+'" y="'+(h-bh).toFixed(2)+
+            '" width="'+(bw*0.7).toFixed(2)+'" height="'+Math.max(bh,v>0?1.2:0).toFixed(2)+
+            '" rx="'+Math.min(bw*0.3,1.2).toFixed(2)+'" fill="'+colour+'"/>';
+  });
+  return '<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none" style="height:34px;margin-top:10px">'+bars+'</svg>';
+}
+
+function checkRow(good, title, detail, value){
+  const cls = good === true ? "ok" : good === false ? "bad" : "mid";
+  return '<div class="check"><span class="pip '+cls+'"></span><div><div class="t">'+title+
+         '</div><div class="d">'+detail+'</div></div><div class="v">'+value+'</div></div>';
+}
+
+function render(){
+  const d = DATA; if (!d) return;
+  const m = d.money, c = d.cost, u = d.usage, p = d.people, L = d.limits,
+        lk = d.leaks, li = d.liability, ct = d.content, ac = d.active;
+
+  const profit = Number(m.revenue_total) - Number(c.spent_total);
+  const bal = balance();
+  const burn7 = Number(c.spent_7d) / 7;
+  const runway = (bal > 0 && burn7 > 0) ? Math.floor(bal / burn7) : null;
+  const conv = p.users ? (100 * d.paying.users / p.users) : 0;
+
+  $("stamp").textContent = new Date(d.generated_at).toLocaleString("en-IN",
+    { dateStyle:"medium", timeStyle:"short" }) + " IST";
+
+  let h = "";
+
+  /* ---------------- money ---------------- */
+  h += '<h2 class="sec">Money</h2><div class="grid g4">';
+  h += '<div class="card"><h3>Revenue</h3><div class="big">'+rs(m.revenue_total)+
+       '</div><div class="sub">'+rs(m.revenue_today)+' today &middot; '+rs(m.revenue_30d)+' in 30d</div>'+
+       sparkline(d.daily,"revenue","#32d74b")+'</div>';
+  h += '<div class="card"><h3>AI cost</h3><div class="big">'+rs(c.spent_total)+
+       '</div><div class="sub">'+rs(c.spent_today)+' today &middot; '+rs(c.per_plan)+'/plan</div>'+
+       sparkline(d.daily,"cost","#ff453a")+'</div>';
+  h += '<div class="card"><h3>Profit</h3><div class="big '+(profit>=0?"pos":"neg")+'">'+rs(profit)+
+       '</div><div class="sub">'+num(m.purchases)+' purchases &middot; '+num(m.credits_sold)+' credits sold</div></div>';
+  h += '<div class="card"><h3>Unspent credits</h3><div class="big">'+num(li.credits_outstanding)+
+       '</div><div class="sub">'+rs(li.future_ai_cost)+' of AI you still owe &middot; '+num(li.holders)+' accounts</div></div>';
+  h += '</div>';
+
+  /* ---------------- fuel ---------------- */
+  h += '<h2 class="sec">AI fuel</h2><div class="grid g3">';
+  h += '<div class="card"><h3>Provider balance</h3><div class="big">'+(bal?rs(bal):'<span class="muted">not set</span>')+
+       '</div><div class="sub">'+(bal<=0?'set it to see how long your money lasts':
+         runway===null?'no spending yet':
+         (runway>365?'over a year of runway':num(runway)+' days at current burn'))+
+       '</div><div style="margin-top:11px"><button class="ghost small" onclick="setBalance()">Update balance</button></div>'+
+       '<div class="hint">Stored only in this browser. Read it from your Google Cloud billing page.</div></div>';
+  h += '<div class="card"><h3>Needed to cover all sold credits</h3><div class="big '+
+       (!bal ? "" : bal < li.future_ai_cost ? "neg" : "pos")+'">'+rs(li.future_ai_cost)+
+       '</div><div class="sub">'+(bal ? (bal >= li.future_ai_cost ? 'fully covered' :
+         'short by '+rs(li.future_ai_cost - bal)) : 'set your balance to compare')+'</div></div>';
+  h += '<div class="card"><h3>Burn rate</h3><div class="big">'+rs(burn7)+'</div>'+
+       '<div class="sub">per day, 7-day average &middot; '+rs(c.spent_month)+' this month</div></div>';
+  h += '</div>';
+
+  /* ---------------- people ---------------- */
+  h += '<h2 class="sec">People</h2><div class="grid g4">';
+  h += '<div class="card"><h3>Accounts</h3><div class="big">'+num(p.users)+
+       '</div><div class="sub">+'+num(p.new_today)+' today &middot; +'+num(p.new_7d)+' in 7d</div>'+
+       sparkline(d.daily,"signups","#0a84ff")+'</div>';
+  h += '<div class="card"><h3>Active today</h3><div class="big">'+num(ac.today)+
+       '</div><div class="sub">'+num(ac.d7)+' in 7d &middot; '+num(ac.d30)+' in 30d</div></div>';
+  h += '<div class="card"><h3>Paying users</h3><div class="big">'+num(d.paying.users)+
+       '</div><div class="sub">'+conv.toFixed(1)+'% of all accounts</div></div>';
+  h += '<div class="card"><h3>Blocked</h3><div class="big '+(p.blocked?"warn":"")+'">'+num(p.blocked)+
+       '</div><div class="sub">'+num(p.with_credits)+' accounts hold credits</div></div>';
+  h += '</div>';
+
+  /* ---------------- activity ---------------- */
+  h += '<h2 class="sec">Activity</h2><div class="grid g4">';
+  h += '<div class="card"><h3>Plans today</h3><div class="big">'+num(u.plans_today)+
+       '</div><div class="sub">'+num(u.plans_7d)+' in 7d &middot; '+num(u.plans_ever)+' ever</div>'+
+       sparkline(d.daily,"plans","#bf5af2")+'</div>';
+  h += '<div class="card"><h3>Plans stored</h3><div class="big">'+num(ct.plans)+
+       '</div><div class="sub">'+num(ct.shared_plans)+' shared &middot; avg '+ct.avg_plan_days+' days</div></div>';
+  h += '<div class="card"><h3>Notes</h3><div class="big">'+num(ct.notes)+
+       '</div><div class="sub">'+num(ct.notes_locked)+' locked &amp; encrypted</div></div>';
+  h += '<div class="card"><h3>Refunds</h3><div class="big '+(u.refunds_today?"warn":"")+'">'+num(u.refunds_today)+
+       '</div><div class="sub">'+num(u.refunds_ever)+' ever &middot; '+lk.refund_rate_pct+'% of all plans</div></div>';
+  h += '</div>';
+
+  /* ---------------- health ---------------- */
+  const cwp = lk.credits_without_purchase;
+  h += '<h2 class="sec">What is working, what is not</h2><div class="card">';
+  h += checkRow(cwp.accounts === 0, "Credits all backed by a payment",
+        cwp.accounts === 0 ? "No free credits in circulation"
+          : cwp.accounts + " account(s) hold credits nobody paid for — worth " + rs(cwp.value),
+        num(cwp.credits) + " credits");
+  h += checkRow(lk.purchases_granting_nothing === 0, "Every payment delivered credits",
+        lk.purchases_granting_nothing === 0 ? "No customer paid and got nothing"
+          : "Webhook failed — these people paid and were not credited",
+        num(lk.purchases_granting_nothing));
+  h += checkRow(lk.over_user_cap_today === 0, "Nobody past the per-account limit",
+        "Cap is " + num(L.per_user_cap) + " plans per account per day", num(lk.over_user_cap_today));
+  h += checkRow(Number(lk.refund_rate_pct) < 10, "Generation is succeeding",
+        "Refunds happen when the AI call fails. Under 10% is normal.",
+        lk.refund_rate_pct + "%");
+  h += checkRow(lk.negative_credits === 0, "No negative balances",
+        "A negative balance means credits were spent twice", num(lk.negative_credits));
+  h += checkRow(lk.duplicate_friend_codes === 0 && lk.duplicate_join_codes === 0, "Codes are unique",
+        "Duplicate friend or join codes would leak data between accounts",
+        num(lk.duplicate_friend_codes + lk.duplicate_join_codes));
+  h += checkRow(lk.orphan_memberships === 0, "No orphaned plan members",
+        "Members pointing at a deleted plan or profile", num(lk.orphan_memberships));
+  h += checkRow(lk.plans_without_data === 0, "No empty plans",
+        "A plan row with no content means a charge with nothing delivered", num(lk.plans_without_data));
+  h += checkRow(lk.profiles_without_auth === 0, "No leftover profiles",
+        "Profile rows whose sign-in was deleted — a deletion that did not finish",
+        num(lk.profiles_without_auth));
+  h += checkRow(lk.purchases_without_price === 0, "All purchases have a price",
+        "Missing prices make revenue and tax records wrong", num(lk.purchases_without_price));
+  h += '</div>';
+
+  /* ---------------- limits ---------------- */
+  const dPct = Math.min(100, 100 * L.daily_used / Math.max(1, L.daily_cap));
+  const mPct = Math.min(100, 100 * L.monthly_used / Math.max(1, L.monthly_cap));
+  h += '<h2 class="sec">Spending limits</h2><div class="grid g2">';
+  h += '<div class="card"><h3>Today</h3><div class="big">'+num(L.daily_used)+' <span class="sub">/ '+num(L.daily_cap)+'</span></div>'+
+       '<div class="meter"><i style="width:'+dPct.toFixed(1)+'%;background:'+(dPct>80?"var(--red)":"var(--blue)")+'"></i></div>'+
+       '<div class="sub" style="margin-top:8px">Worst case today: '+rs(L.daily_cap * c.per_plan)+'</div></div>';
+  h += '<div class="card"><h3>This month</h3><div class="big">'+num(L.monthly_used)+' <span class="sub">/ '+num(L.monthly_cap)+'</span></div>'+
+       '<div class="meter"><i style="width:'+mPct.toFixed(1)+'%;background:'+(mPct>80?"var(--red)":"var(--blue)")+'"></i></div>'+
+       '<div class="sub" style="margin-top:8px">Worst case this month: '+rs(L.monthly_cap * c.per_plan)+'</div></div>';
+  h += '</div>';
+
+  h += '<div class="card" style="margin-top:12px">';
+  h += '<div class="row" style="margin-bottom:10px"><label>Daily cap</label><input id="capD" type="number" value="'+L.daily_cap+'"><button class="ghost small" onclick="act(\'set_daily_cap\',{value:capD.value})">Save</button></div>';
+  h += '<div class="row" style="margin-bottom:10px"><label>Monthly cap</label><input id="capM" type="number" value="'+L.monthly_cap+'"><button class="ghost small" onclick="act(\'set_monthly_cap\',{value:capM.value})">Save</button></div>';
+  h += '<div class="row" style="margin-bottom:10px"><label>Per account per day</label><input id="capU" type="number" value="'+L.per_user_cap+'"><button class="ghost small" onclick="act(\'set_per_user_cap\',{value:capU.value})">Save</button></div>';
+  h += '<div class="row"><label>Cost per plan (paise)</label><input id="capC" type="number" value="'+Math.round(c.per_plan*100)+'"><button class="ghost small" onclick="act(\'set_cost\',{value:capC.value})">Save</button></div>';
+  h += '<div class="hint">Changes take effect on the very next request. No app update needed.</div></div>';
+
+  /* ---------------- emergency ---------------- */
+  h += '<h2 class="sec">Emergency</h2><div class="card stop">';
+  h += '<div class="row"><button class="danger" onclick="act(\'stop_all\',null,\'Stop ALL plan generation right now?\\n\\nNobody will be able to generate a plan. No credits are taken, nothing is deleted, and everything else keeps working.\')">Stop all AI spending</button>';
+  h += '<button class="ghost" onclick="act(\'set_daily_cap\',{value:5000},\'Resume generation with a 5,000/day cap?\')">Resume (5,000/day)</button></div>';
+  h += '<div class="hint">Stopping sets the daily cap to zero. It does not touch a single row of anyone’s data — plans, notes, credits and progress all stay exactly as they are, and resuming puts everything back instantly.</div></div>';
+
+  /* ---------------- tables ---------------- */
+  h += '<h2 class="sec">Heaviest accounts today</h2><div class="card">';
+  if (!d.top_users_today.length) h += '<div class="empty">Nobody has generated a plan today.</div>';
+  else {
+    h += '<div class="tw"><table><tr><th>Account</th><th>Code</th><th>Plans</th><th>Credits</th><th></th></tr>';
+    d.top_users_today.forEach(t => {
+      const over = t.plans > L.per_user_cap * 0.8;
+      h += '<tr><td>'+esc(t.name)+(t.blocked?' <span class="neg">blocked</span>':'')+
+           '</td><td class="muted">'+esc(t.code)+'</td><td'+(over?' class="warn"':'')+'>'+num(t.plans)+
+           '</td><td>'+num(t.credits)+'</td><td style="text-align:right">'+
+           (t.blocked
+             ? '<button class="ghost small" onclick="act(\'unblock_user\',{uid:\''+t.user_id+'\'})">Unblock</button>'
+             : '<button class="ghost small" onclick="act(\'block_user\',{uid:\''+t.user_id+'\'},\'Block '+esc(t.name).replace(/'/g,"")+'? They keep all their data and can be unblocked instantly.\')">Block</button>')+
+           '</td></tr>';
+    });
+    h += '</table></div>';
+  }
+  h += '</div>';
+
+  h += '<h2 class="sec">Recent purchases</h2><div class="card">';
+  if (!d.recent_purchases.length) h += '<div class="empty">No purchases yet.</div>';
+  else {
+    h += '<div class="tw"><table><tr><th>When</th><th>Who</th><th>Product</th><th>Credits</th><th>Amount</th></tr>';
+    d.recent_purchases.forEach(t => {
+      h += '<tr><td class="muted">'+new Date(t.at).toLocaleString("en-IN",{dateStyle:"short",timeStyle:"short"})+
+           '</td><td>'+esc(t.name||"—")+'</td><td class="muted">'+esc(t.product)+
+           '</td><td>'+num(t.credits)+'</td><td>'+rs(t.amount)+'</td></tr>';
+    });
+    h += '</table></div>';
+  }
+  h += '</div>';
+
+  $("body").innerHTML = h;
+}
+
+/* auto sign-in if the token is already remembered on this device */
+(function(){
+  let saved = null;
+  try { saved = localStorage.getItem("e247.admin"); } catch(e){}
+  if (saved) { $("tok").value = saved; signIn(); }
+})();
+</script>
+</body>
+</html>
