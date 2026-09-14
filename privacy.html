@@ -58,11 +58,24 @@
     <li><strong>Notes you write:</strong> if you use the Notes tab, the date, title,
         text, mood and colour of each note are stored in your account so they sync
         across your devices. Notes are private to you, are never shared with other
-        users, and are <strong>never sent to the AI</strong>. If you lock a note, the
-        4-digit PIN you choose is stored with your profile so the app can check it.
-        This PIN is a convenience lock to keep a casual reader out &mdash; it is
-        <em>not</em> encryption, so please do not store anything you could not bear to
-        lose or have seen.</li>
+        users, and are <strong>never sent to the AI</strong>.
+        <ul>
+          <li><strong>Locked notes are end-to-end encrypted.</strong> When you lock a
+              note it is encrypted on your own device with a key derived from your
+              4-digit PIN. Only the scrambled text ever reaches our servers.
+              <strong>We cannot read your locked notes</strong>, and neither can
+              anyone who obtained a copy of our database. We do not store your PIN
+              itself &mdash; only a one-way hash of it &mdash; so we cannot recover
+              or reset it. If you forget your PIN, those notes cannot be opened
+              again by anyone, including us.</li>
+          <li><strong>Unlocked notes are stored in readable form</strong> on our
+              database provider (Supabase), protected by transport encryption,
+              encryption at rest, and row-level security so that no other user can
+              access them. Our staff do not read them, and we never use them for
+              advertising, profiling or AI training &mdash; but we are technically
+              able to access them, in the same way as most major notes apps. If you
+              want a note to be readable only by you, lock it.</li>
+        </ul></li>
     <li><strong>Payment data:</strong> we do <em>not</em> see or store your card
         details. Payments are processed entirely by Apple App Store or Google Play.
         We only receive a record that a credit pack was purchased.</li>
@@ -162,7 +175,15 @@
     please email <strong>hustlecreates@gmail.com</strong>.
   </p>
 
-  <h2>11. Changes to this policy</h2>
+    <p>
+    <strong>Locked notes use end-to-end encryption (AES-256-GCM).</strong> The key is
+    derived from your PIN on your own device using PBKDF2; it is never transmitted and
+    never stored. This means a locked note is unreadable to us, to our hosting provider,
+    and to anyone who obtains a copy of our data. Your PIN is stored only as a salted
+    SHA-256 hash, so it cannot be recovered from our systems.
+  </p>
+
+<h2>11. Changes to this policy</h2>
   <p>
     If we change this policy materially, we will update the “Last updated” date and
     notify you in the App on next launch. Continued use means you accept the updated
