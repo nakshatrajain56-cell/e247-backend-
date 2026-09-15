@@ -121,6 +121,26 @@ async function resolveUser(req) {
   }
 }
 
+async function rpcRaw(fn, payload) {
+  const { url, serviceKey } = sbEnv();
+  if (!url || !serviceKey) return null;
+  const r = await fetch(`${url}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+    },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!r.ok) {
+    console.error(`${fn} failed:`, r.status, (await r.text()).slice(0, 200));
+    return null;
+  }
+  const t = await r.text();
+  return t ? JSON.parse(t) : null;
+}
+
 async function creditRpc(fn, uid) {
   const { url, serviceKey } = sbEnv();
   if (!url || !serviceKey) return null;
@@ -314,10 +334,22 @@ export default async function handler(req, res) {
       return res.status(402).json({ error: "No plan credits left.", code: "NO_CREDITS" });
     }
     let charged = true;
-    const refund = async () => {
+    // Vercel Hobby keeps only 1 hour of runtime logs, so every refund also
+    // records why it happened. Read it back from the control centre.
+    const refund = async (reason, detail, status) => {
       if (!charged) return;
       charged = false;
       await creditRpc("refund_credit_for_user", uid);
+      try {
+        await rpcRaw("log_generation_failure", {
+          p_uid: uid,
+          p_reason: reason || "unknown",
+          p_detail: detail ? String(detail).slice(0, 1000) : null,
+          p_status: Number.isFinite(status) ? status : null,
+        });
+      } catch (e) {
+        console.error("log_generation_failure:", String(e).slice(0, 200));
+      }
     };
 
     const safeGoal = maskSensitiveText(goal.trim());
@@ -355,7 +387,7 @@ export default async function handler(req, res) {
     }
 
     if (!r || !r.ok) {
-      await refund();
+      await refund("all_models_failed", lastDetail, lastStatus);
       return res.status(502).json({
         error: "All Gemini models failed",
         lastStatus,
@@ -380,7 +412,7 @@ export default async function handler(req, res) {
       const last = clean.lastIndexOf("}");
       if (first === -1 || last === -1 || last <= first) {
         console.error("No JSON object. finishReason:", finishReason, "Raw:", text.slice(0, 500));
-        await refund();
+        await refund("no_json_in_reply", `finishReason=${finishReason} raw=${text.slice(0, 300)}`);
         return res.status(502).json({
           error: "AI returned no JSON",
           finishReason,
@@ -391,7 +423,7 @@ export default async function handler(req, res) {
       obj = JSON.parse(clean.slice(first, last + 1));
     } catch (parseErr) {
       console.error("Parse error:", parseErr, "finishReason:", finishReason, "len:", text.length);
-      await refund();
+      await refund("json_parse_error", `finishReason=${finishReason} len=${text.length} err=${String(parseErr).slice(0,200)}`);
       return res.status(502).json({
         error: "Could not parse plan JSON",
         finishReason,
@@ -404,7 +436,7 @@ export default async function handler(req, res) {
     // The app refuses harmful goals on its own too, but double-check here.
     // A refused goal costs nothing — give the credit back.
     if (obj.refusal) {
-      await refund();
+      await refund("model_refusal", String(obj.refusal).slice(0, 300));
       return res.status(200).json({ plan: { refusal: obj.refusal } });
     }
 
