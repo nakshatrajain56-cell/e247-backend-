@@ -104,6 +104,24 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing event.id or event.type" });
   }
 
+  // ── 2b. Sandbox purchases grant credits only to known testers ──
+  // Google gives licence testers and internal-track testers FREE test
+  // purchases. RevenueCat marks those events environment: "SANDBOX".
+  // Real customers buying from the store are always "PRODUCTION".
+  // Without this gate, anyone Google treats as a tester could mint
+  // unlimited credits at no cost to them and full AI cost to us.
+  const environment = String(event.environment || "").toUpperCase().slice(0, 20);
+  const SANDBOX_ALLOWED = new Set([
+    "bd98e084-d757-4f09-85b5-37a4705ff7b6", // nakshatrajain56 — founder
+    "c6e4b561-9a42-4b3f-acf2-e12a639dd211", // tapp62314 — Play reviewer account
+  ]);
+  if (environment === "SANDBOX" &&
+      !SANDBOX_ALLOWED.has(appUserId) &&
+      !SANDBOX_ALLOWED.has(originalAppUserId)) {
+    console.warn(`Webhook: refused SANDBOX purchase for ${appUserId} (event ${eventId})`);
+    return res.status(200).json({ status: "ignored", reason: "sandbox_not_allowed" });
+  }
+
   // ── 3. Ignore events that do not grant credits ──────────────
   // We still return 200 so RevenueCat does not retry these forever.
   if (!CREDIT_GRANTING_EVENTS.has(eventType)) {
