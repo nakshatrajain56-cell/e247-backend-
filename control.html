@@ -304,8 +304,8 @@ function render(){
   h += checkRow(lk.over_user_cap_today === 0, "Nobody past the per-account limit",
         "Cap is " + num(L.per_user_cap) + " plans per account per day", num(lk.over_user_cap_today));
   h += checkRow(Number(lk.refund_rate_pct) < 10, "Generation is succeeding",
-        "Refunds happen when the AI call fails. Under 10% is normal.",
-        lk.refund_rate_pct + "%");
+        "Share of attempts where the AI failed and the credit was given back. Under 10% is normal.",
+        lk.refund_rate_pct + "% failed");
   h += checkRow(lk.negative_credits === 0, "No negative balances",
         "A negative balance means credits were spent twice", num(lk.negative_credits));
   h += checkRow(lk.duplicate_friend_codes === 0 && lk.duplicate_join_codes === 0, "Codes are unique",
@@ -321,6 +321,25 @@ function render(){
   h += checkRow(lk.purchases_without_price === 0, "All purchases have a price",
         "Missing prices make revenue and tax records wrong", num(lk.purchases_without_price));
   h += '</div>';
+
+  /* ---------------- why generations failed ---------------- */
+  const F = d.failures || [];
+  h += '<h2 class="sec">Why generations failed</h2><div class="card">';
+  if (!F.length) {
+    h += '<div class="empty">No failures recorded. Reasons are logged from the moment this was switched on &mdash; earlier failures were not captured.</div>';
+  } else {
+    h += '<div class="tw"><table><tr><th>Reason</th><th>Times</th><th>Last</th><th>Detail</th></tr>';
+    F.forEach(function (f) {
+      h += '<tr><td>' + esc(f.reason) + '</td><td>' + num(f.count) +
+           '</td><td class="muted">' +
+           new Date(f.last).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" }) +
+           '</td><td class="muted" style="max-width:340px">' + esc(f.sample || "") + '</td></tr>';
+    });
+    h += '</table></div>';
+  }
+  h += '<div class="hint">all_models_failed = Google returned an error (quota, key, outage). ' +
+       'no_json_in_reply = the model answered but not as JSON, often a cut-off reply. ' +
+       'json_parse_error = broken JSON. model_refusal = the goal was rejected as unsafe.</div></div>';
 
   /* ---------------- limits ---------------- */
   const dPct = Math.min(100, 100 * L.daily_used / Math.max(1, L.daily_cap));
